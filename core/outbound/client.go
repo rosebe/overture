@@ -55,7 +55,7 @@ func (c *Client) getEDNSClientSubnetIP() {
 
 func (c *Client) ExchangeFromRemote(isCache bool, isLog bool) {
 
-	common.SetEDNSClientSubnet(c.QuestionMessage, c.EDNSClientSubnetIP)
+	common.SetEDNSClientSubnet(c.QuestionMessage, c.EDNSClientSubnetIP, c.DNSUpstream.EDNSClientSubnet.NoCookie)
 	c.EDNSClientSubnetIP = common.GetEDNSClientSubnetIP(c.QuestionMessage)
 
 	var conn net.Conn
@@ -94,11 +94,7 @@ func (c *Client) ExchangeFromRemote(isCache bool, isLog bool) {
 	temp, err := dc.ReadMsg()
 
 	if err != nil {
-		if err == dns.ErrTruncated {
-			log.Warn(c.DNSUpstream.Name + " Fail: Maybe this server does not support EDNS Client Subnet")
-		}else{
-			log.Warn(c.DNSUpstream.Name + " Fail: ", err)
-		}
+		log.Warn(c.DNSUpstream.Name+" Fail: ", err)
 		return
 	}
 	if temp == nil {

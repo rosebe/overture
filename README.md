@@ -42,8 +42,6 @@ For ArchLinux users, package `overture` is available in AUR. If you use a AUR he
 
     yaourt -S overture
 
-For mips users, please assure the kernel FPU emulation is enabled, check [#32](https://github.com/shawn1m/overture/issues/32) [#26](https://github.com/shawn1m/overture/issues/26) [golang/go#18880](https://github.com/golang/go/issues/18880) for details.
-
 ## Usages
 
 Start with the default config file -> ./config.json
@@ -87,7 +85,8 @@ Configuration file is "config.json" by default:
       "Timeout": 6,
       "EDNSClientSubnet": {
         "Policy": "disable",
-        "ExternalIP": ""
+        "ExternalIP": "",
+        "NoCookie": true
       }
     }
   ],
@@ -100,7 +99,8 @@ Configuration file is "config.json" by default:
       "Timeout": 6,
       "EDNSClientSubnet": {
         "Policy": "disable",
-        "ExternalIP": ""
+        "ExternalIP": "",
+        "NoCookie": true
       }
     }
   ],
@@ -137,6 +137,7 @@ IPv6). Overture will handle both TCP and UDP requests. Literal IPv6 addresses ar
             + `manual`: Use external IP if this field is not empty, otherwise use client IP if it is not reserved IP.
             + `disable`: Disable this feature.
         + ExternalIP: If this field is empty, ECS will be disabled when the inbound IP is not an external IP.
+        + NoCookie: Disable cookie.
 + OnlyPrimaryDNS: Disable dispatcher feature, use primary DNS only.
 + IPv6UseAlternativeDNS: Redirect IPv6 DNS queries to alternative DNS servers.
 + File: Absolute path like `/path/to/file` is allowed. For Windows users, please use properly escaped path like
