@@ -17,7 +17,7 @@ import (
 
 // For auto version building
 //  go build -ldflags "-X main.version=version"
-var version string
+var version = ""
 
 func main() {
 
@@ -26,13 +26,25 @@ func main() {
 		logPath         string
 		isLogVerbose    bool
 		processorNumber int
+		isShowVersion   bool
 	)
 
 	flag.StringVar(&configPath, "c", "./config.json", "config file path")
 	flag.StringVar(&logPath, "l", "", "log file path")
 	flag.BoolVar(&isLogVerbose, "v", false, "verbose mode")
 	flag.IntVar(&processorNumber, "p", runtime.NumCPU(), "number of processor to use")
+	flag.BoolVar(&isShowVersion, "V", false, "current version of overture")
 	flag.Parse()
+
+	if isShowVersion {
+		println(version)
+		return
+	}
+
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05",
+	})
 
 	if isLogVerbose {
 		log.SetLevel(log.DebugLevel)

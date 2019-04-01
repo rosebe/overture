@@ -76,7 +76,7 @@ Configuration file is "config.json" by default:
 ```json
 {
   "BindAddress": ":53",
-  "HTTPAddress": ":5555",
+  "DebugHTTPAddress": "127.0.0.1:5555",
   "PrimaryDNS": [
     {
       "Name": "DNSPod",
@@ -107,6 +107,7 @@ Configuration file is "config.json" by default:
   ],
   "OnlyPrimaryDNS": false,
   "IPv6UseAlternativeDNS": false,
+  "WhenPrimaryDNSAnswerNoneUse": "PrimaryDNS",
   "IPNetworkFile": {
     "Primary": "./ip_network_primary_sample",
     "Alternative": "./ip_network_alternative_sample"
@@ -117,8 +118,9 @@ Configuration file is "config.json" by default:
   },
   "HostsFile": "./hosts_sample",
   "MinimumTTL": 0,
+  "DomainTTLFile" : "./domain_ttl_sample",
   "CacheSize" : 0,
-  "RejectQtype": [255]
+  "RejectQType": [255]
 }
 ```
 
@@ -126,7 +128,7 @@ Tips:
 
 + BindAddress: Specifying only port (e.g. `:53`) will have overture listen on all available addresses (both IPv4 and
 IPv6). Overture will handle both TCP and UDP requests. Literal IPv6 addresses are enclosed in square brackets (e.g. `[2001:4860:4860::8888]:53`)
-+ HTTPAddress: Specifying an HTTP port for debugging, currently used to dump DNS cache, and the request url is `/cache`, available query argument is `nobody`(boolean)
++ DebugHTTPAddress: Specifying an HTTP port for debugging, currently used to dump DNS cache, and the request url is `/cache`, available query argument is `nobody`(boolean)
 
     * true(default): only get the cache size;
 
@@ -193,28 +195,33 @@ IPv6). Overture will handle both TCP and UDP requests. Literal IPv6 addresses ar
         + NoCookie: Disable cookie.
 + OnlyPrimaryDNS: Disable dispatcher feature, use primary DNS only.
 + IPv6UseAlternativeDNS: Redirect IPv6 DNS queries to alternative DNS servers.
++ WhenPrimaryDNSAnswerNoneUse: If the response of PrimaryDNS exists and there is no `ANSWER SECTION` in it, the final DNS should be defined. (There is no `AAAA` record for most domains right now) 
 + File: Absolute path like `/path/to/file` is allowed. For Windows users, please use properly escaped path like
   `C:\\path\\to\\file.txt` in the configuration.
 + MinimumTTL: Set the minimum TTL value (in seconds) in order to improve caching efficiency, use `0` to disable.
 + CacheSize: The number of query record to cache, use `0` to disable.
-+ RejectQtype: Reject inbound query with specific DNS record types, check [List of DNS record types](https://en.wikipedia.org/wiki/List_of_DNS_record_types) for details.
++ RejectQType: Reject inbound query with specific DNS record types, check [List of DNS record types](https://en.wikipedia.org/wiki/List_of_DNS_record_types) for details.
 
-#### Domain file example (Suffix match)
+#### Domain file example (regex match)
 
     example.com
-    xxx.xx
+    ^xxx.xx
 
-#### IP network file example
+#### IP network file example (CIDR match)
 
     1.0.1.0/24
     10.8.0.0/16
     ::1/128
+    
+ #### Domain TTL file example (regex match)
+ 
+     example.com$ 100
 
-#### Hosts file example
+#### Hosts file example (regex match)
 
     127.0.0.1 localhost
     ::1 localhost
-    10.8.0.1 example.com
+    10.8.0.1 example.com$
 
 #### DNS servers with ECS support
 
@@ -283,7 +290,7 @@ www.qq.com.     43  IN  A   14.17.42.40
 + Code reference:
     + [skydns](https://github.com/skynetservices/skydns): MIT
     + [go-dnsmasq](https://github.com/janeczku/go-dnsmasq):  MIT
-+ Contributors: @V-E-O, @sh1r0, @maddie, @hexchain, @everfly, @simonsmh, @jemyzhang, @hexchain, @sh1r0, @yujinqiu, @qyb
++ Contributors: @V-E-O, @sh1r0, @maddie, @hexchain, @everfly, @simonsmh, @jemyzhang, @hexchain, @sh1r0, @yujinqiu, @qyb, @jsvisa, @Love4Taylor, @godla, @comzyh
 
 ## License
 

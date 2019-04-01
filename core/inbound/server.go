@@ -17,18 +17,18 @@ import (
 )
 
 type Server struct {
-	bindAddress string
-	httpAddress string
-	dispatcher  outbound.Dispatcher
-	rejectQtype []uint16
+	bindAddress      string
+	debugHttpAddress string
+	dispatcher       outbound.Dispatcher
+	rejectQType      []uint16
 }
 
-func NewServer(bindAddress string, httpAddress string, dispatcher outbound.Dispatcher, rejectQType []uint16) *Server {
+func NewServer(bindAddress string, debugHTTPAddress string, dispatcher outbound.Dispatcher, rejectQType []uint16) *Server {
 	return &Server{
-		bindAddress: bindAddress,
-		httpAddress: httpAddress,
-		dispatcher:  dispatcher,
-		rejectQtype: rejectQType,
+		bindAddress:      bindAddress,
+		debugHttpAddress: debugHTTPAddress,
+		dispatcher:       dispatcher,
+		rejectQType:      rejectQType,
 	}
 }
 
@@ -111,32 +111,30 @@ func (s *Server) Run() {
 		}(p)
 	}
 
-	if s.httpAddress != "" {
+	if s.debugHttpAddress != "" {
 		http.HandleFunc("/cache", s.DumpCache)
 		wg.Add(1)
-		go http.ListenAndServe(s.httpAddress, nil)
+		go http.ListenAndServe(s.debugHttpAddress, nil)
 	}
 
 	wg.Wait()
 }
 
 func (s *Server) ServeDNS(w dns.ResponseWriter, q *dns.Msg) {
-
 	inboundIP, _, _ := net.SplitHostPort(w.RemoteAddr().String())
-	s.dispatcher.InboundIP = inboundIP
-	s.dispatcher.QuestionMessage = q
 
 	log.Debug("Question from " + inboundIP + ": " + q.Question[0].String())
 
-	for _, qt := range s.rejectQtype {
+	for _, qt := range s.rejectQType {
 		if isQuestionType(q, qt) {
 			return
 		}
 	}
 
-	responseMessage := s.dispatcher.Exchange()
+	responseMessage := s.dispatcher.Exchange(q, inboundIP)
 
 	if responseMessage == nil {
+		dns.HandleFailed(w, q)
 		return
 	}
 

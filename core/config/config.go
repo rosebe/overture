@@ -21,7 +21,7 @@ import (
 
 type Config struct {
 	BindAddress           string `json:"BindAddress"`
-	HTTPAddress           string `json:"HTTPAddress"`
+	DebugHTTPAddress      string `json:"DebugHTTPAddress"`
 	PrimaryDNS            []*common.DNSUpstream
 	AlternativeDNS        []*common.DNSUpstream
 	OnlyPrimaryDNS        bool
@@ -34,23 +34,28 @@ type Config struct {
 		Primary     string
 		Alternative string
 	}
-	HostsFile   string
-	MinimumTTL  int
-	CacheSize   int
-	RejectQtype []uint16
+	HostsFile     string
+	MinimumTTL    int
+	DomainTTLFile string
+	CacheSize     int
+	RejectQType   []uint16
 
-	DomainPrimaryList        []string
-	DomainAlternativeList    []string
-	IPNetworkPrimaryList     []*net.IPNet
-	IPNetworkAlternativeList []*net.IPNet
-	Hosts                    *hosts.Hosts
-	Cache                    *cache.Cache
+	DomainTTLMap                map[string]uint32
+	DomainPrimaryList           []string
+	DomainAlternativeList       []string
+	WhenPrimaryDNSAnswerNoneUse string
+	IPNetworkPrimaryList        []*net.IPNet
+	IPNetworkAlternativeList    []*net.IPNet
+	Hosts                       *hosts.Hosts
+	Cache                       *cache.Cache
 }
 
 // New config with json file and do some other initiate works
 func NewConfig(configFile string) *Config {
 
 	config := parseJson(configFile)
+
+	config.DomainTTLMap = getDomainTTLMap(config.DomainTTLFile)
 
 	config.DomainPrimaryList = getDomainList(config.DomainFile.Primary)
 	config.DomainAlternativeList = getDomainList(config.DomainFile.Alternative)
@@ -107,11 +112,54 @@ func parseJson(path string) *Config {
 	return j
 }
 
-func getDomainList(file string) []string {
+func getDomainTTLMap(file string) map[string]uint32 {
+
+	if file == "" {
+		return map[string]uint32{}
+	}
 
 	f, err := ioutil.ReadFile(file)
 	if err != nil {
-		log.Error("Open Domain WhiteList file failed: ", err)
+		log.Error("Open file "+file+" failed: ", err)
+		return nil
+	}
+
+	lines := 0
+	s := string(f)
+	dtl := map[string]uint32{}
+
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		words := strings.Fields(line)
+		tempInt64, err := strconv.ParseUint(words[1], 10, 32)
+		dtl[words[0]] = uint32(tempInt64)
+		if err != nil {
+			log.WithFields(log.Fields{"domain": words[0], "ttl": words[1]}).Warn("This TTL is not a number!")
+		}
+		lines++
+	}
+
+	if len(dtl) > 0 {
+		log.Infof("Load domain TTL "+file+" successful with %d records ", lines)
+	} else {
+		log.Warn("There is no element in domain TTL file")
+	}
+
+	return dtl
+}
+
+func getDomainList(file string) []string {
+
+	if file == "" {
+		return []string{}
+	}
+
+	f, err := ioutil.ReadFile(file)
+	if err != nil {
+		log.Error("Open file "+file+" failed: ", err)
 		return nil
 	}
 
@@ -131,7 +179,7 @@ func getDomainList(file string) []string {
 	if len(dl) > 0 {
 		log.Infof("Load domain "+file+" successful with %d records ", lines)
 	} else {
-		log.Warn("There is no element in domain whitelist file")
+		log.Warn("There is no element in this domain file: " + file)
 	}
 
 	return dl

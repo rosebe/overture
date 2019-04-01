@@ -58,13 +58,20 @@ func (c *RemoteClient) getEDNSClientSubnetIP() {
 	}
 }
 
+func (c *RemoteClient) ExchangeFromCache() *dns.Msg {
+	cacheClient := NewCacheClient(c.questionMessage, c.ednsClientSubnetIP, c.cache)
+	c.responseMessage = cacheClient.Exchange()
+	if c.responseMessage != nil {
+		return c.responseMessage
+	}
+	return nil
+}
+
 func (c *RemoteClient) Exchange(isLog bool) *dns.Msg {
 
 	common.SetEDNSClientSubnet(c.questionMessage, c.ednsClientSubnetIP, c.dnsUpstream.EDNSClientSubnet.NoCookie)
 	c.ednsClientSubnetIP = common.GetEDNSClientSubnetIP(c.questionMessage)
 
-	cacheClient := NewCacheClient(c.questionMessage, c.ednsClientSubnetIP, c.cache)
-	c.responseMessage = cacheClient.Exchange()
 	if c.responseMessage != nil {
 		return c.responseMessage
 	}
@@ -124,11 +131,11 @@ func (c *RemoteClient) Exchange(isLog bool) *dns.Msg {
 	temp, err := dc.ReadMsg()
 
 	if err != nil {
-		log.Warn(c.dnsUpstream.Name+" Fail: ", err)
+		log.Debug(c.dnsUpstream.Name+" Fail: ", err)
 		return nil
 	}
 	if temp == nil {
-		log.Warn(c.dnsUpstream.Name + " Fail: Response message is nil, maybe timeout, please check your query or dns configuration")
+		log.Debug(c.dnsUpstream.Name + " Fail: Response message is nil, maybe timeout, please check your query or dns configuration")
 		return nil
 	}
 

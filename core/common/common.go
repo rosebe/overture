@@ -7,6 +7,7 @@ package common
 
 import (
 	"net"
+	"regexp"
 	"strings"
 
 	log "github.com/Sirupsen/logrus"
@@ -34,7 +35,15 @@ func IsIPMatchList(ip net.IP, ipnl []*net.IPNet, isLog bool, name string) bool {
 	return false
 }
 
-func HasAnswer(m *dns.Msg) bool { return len(m.Answer) != 0 }
+func IsDomainMatchRule(pattern string, domain string) bool {
+	matched, err := regexp.MatchString(pattern, domain)
+	if err != nil {
+		log.Warn("Domain:"+domain+" Pattern:"+pattern+" error!", err)
+	}
+	return matched
+}
+
+func HasAnswer(m *dns.Msg) bool { return m != nil && len(m.Answer) != 0 }
 
 func HasSubDomain(s string, sub string) bool {
 
@@ -65,4 +74,30 @@ func FindRecordByType(msg *dns.Msg, t uint16) string {
 	}
 
 	return ""
+}
+
+func SetMinimumTTL(msg *dns.Msg, minimumTTL uint32) {
+
+	if minimumTTL == 0 {
+		return
+	}
+	for _, a := range msg.Answer {
+		if a.Header().Ttl < minimumTTL {
+			a.Header().Ttl = minimumTTL
+		}
+	}
+}
+
+func SetTTLByMap(msg *dns.Msg, domainTTLMap map[string]uint32) {
+	if len(domainTTLMap) == 0 {
+		return
+	}
+	for _, a := range msg.Answer {
+		name := a.Header().Name[:len(a.Header().Name)-1]
+		for k, v := range domainTTLMap {
+			if IsDomainMatchRule(k, name) {
+				a.Header().Ttl = v
+			}
+		}
+	}
 }
