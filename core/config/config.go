@@ -7,13 +7,21 @@ package config
 import (
 	"bufio"
 	"encoding/json"
+
+	"github.com/shawn1m/overture/core/matcher"
+	"github.com/shawn1m/overture/core/matcher/full"
+	"github.com/shawn1m/overture/core/matcher/regex"
+	"github.com/shawn1m/overture/core/matcher/suffix"
+	"github.com/shawn1m/overture/core/matcher/mix"
+
 	"io/ioutil"
 	"net"
 	"os"
 	"strconv"
 	"strings"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/shawn1m/overture/core/cache"
 	"github.com/shawn1m/overture/core/common"
 	"github.com/shawn1m/overture/core/hosts"
@@ -33,6 +41,7 @@ type Config struct {
 	DomainFile struct {
 		Primary     string
 		Alternative string
+		Matcher     string
 	}
 	HostsFile     string
 	MinimumTTL    int
@@ -41,8 +50,8 @@ type Config struct {
 	RejectQType   []uint16
 
 	DomainTTLMap                map[string]uint32
-	DomainPrimaryList           []string
-	DomainAlternativeList       []string
+	DomainPrimaryList           matcher.Matcher
+	DomainAlternativeList       matcher.Matcher
 	WhenPrimaryDNSAnswerNoneUse string
 	IPNetworkPrimaryList        []*net.IPNet
 	IPNetworkAlternativeList    []*net.IPNet
@@ -57,8 +66,8 @@ func NewConfig(configFile string) *Config {
 
 	config.DomainTTLMap = getDomainTTLMap(config.DomainTTLFile)
 
-	config.DomainPrimaryList = getDomainList(config.DomainFile.Primary)
-	config.DomainAlternativeList = getDomainList(config.DomainFile.Alternative)
+	config.DomainPrimaryList = initDomainMatcher(config.DomainFile.Primary, config.DomainFile.Matcher)
+	config.DomainAlternativeList = initDomainMatcher(config.DomainFile.Alternative, config.DomainFile.Matcher)
 
 	config.IPNetworkPrimaryList = getIPNetworkList(config.IPNetworkFile.Primary)
 	config.IPNetworkAlternativeList = getIPNetworkList(config.IPNetworkFile.Alternative)
@@ -151,10 +160,31 @@ func getDomainTTLMap(file string) map[string]uint32 {
 	return dtl
 }
 
-func getDomainList(file string) []string {
+func getDomainMatcher(name string) (m matcher.Matcher) {
+
+	switch name {
+	case "suffix-tree":
+		return suffix.DefaultDomainTree()
+	case "full-map":
+		return &full.Map{DataMap: make(map[string]struct{}, 100)}
+	case "full-list":
+		return &full.List{DataList: []string{}}
+	case "regex-list":
+		return &regex.List{RegexList: []string{}}
+	case "mix-list":
+		return &mix.List{DataList: make([]mix.Data, 0)}
+	default:
+		log.Warn("There is no such matcher: "+name, ", use regex-list matcher as default")
+		return &regex.List{RegexList: []string{}}
+	}
+}
+
+func initDomainMatcher(file string, name string) (m matcher.Matcher) {
+
+	m = getDomainMatcher(name)
 
 	if file == "" {
-		return []string{}
+		return
 	}
 
 	f, err := ioutil.ReadFile(file)
@@ -165,24 +195,23 @@ func getDomainList(file string) []string {
 
 	lines := 0
 	s := string(f)
-	dl := []string{}
 
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		dl = append(dl, line)
+		_ = m.Insert(line)
 		lines++
 	}
 
-	if len(dl) > 0 {
-		log.Infof("Load domain "+file+" successful with %d records ", lines)
+	if lines > 0 {
+		log.Infof("Load domain "+file+" successful with %d records ("+m.Name()+")", lines)
 	} else {
 		log.Warn("There is no element in this domain file: " + file)
 	}
 
-	return dl
+	return
 }
 
 func getIPNetworkList(file string) []*net.IPNet {

@@ -7,11 +7,13 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"runtime"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/shawn1m/overture/core"
 )
 
@@ -37,7 +39,7 @@ func main() {
 	flag.Parse()
 
 	if isShowVersion {
-		println(version)
+		fmt.Println(version)
 		return
 	}
 
