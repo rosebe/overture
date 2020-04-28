@@ -8,17 +8,13 @@
 package clients
 
 import (
-	"crypto/tls"
-	"net"
-	"strings"
-	"time"
-
 	"github.com/miekg/dns"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/proxy"
+	"net"
 
 	"github.com/shawn1m/overture/core/cache"
 	"github.com/shawn1m/overture/core/common"
+	"github.com/shawn1m/overture/core/outbound/clients/resolver"
 )
 
 type RemoteClient struct {
@@ -28,12 +24,13 @@ type RemoteClient struct {
 	dnsUpstream        *common.DNSUpstream
 	ednsClientSubnetIP string
 	inboundIP          string
+	dnsResolver        resolver.Resolver
 
 	cache *cache.Cache
 }
 
-func NewClient(q *dns.Msg, u *common.DNSUpstream, ip string, cache *cache.Cache) *RemoteClient {
-	c := &RemoteClient{questionMessage: q.Copy(), dnsUpstream: u, inboundIP: ip, cache: cache}
+func NewClient(q *dns.Msg, u *common.DNSUpstream, resolver resolver.Resolver, ip string, cache *cache.Cache) *RemoteClient {
+	c := &RemoteClient{questionMessage: q.Copy(), dnsUpstream: u, dnsResolver: resolver, inboundIP: ip, cache: cache}
 	c.getEDNSClientSubnetIP()
 
 	return c
@@ -67,73 +64,24 @@ func (c *RemoteClient) ExchangeFromCache() *dns.Msg {
 }
 
 func (c *RemoteClient) Exchange(isLog bool) *dns.Msg {
-	common.SetEDNSClientSubnet(c.questionMessage, c.ednsClientSubnetIP, c.dnsUpstream.EDNSClientSubnet.NoCookie)
+	common.SetEDNSClientSubnet(c.questionMessage, c.ednsClientSubnetIP,
+		c.dnsUpstream.EDNSClientSubnet.NoCookie)
 	c.ednsClientSubnetIP = common.GetEDNSClientSubnetIP(c.questionMessage)
 
 	if c.responseMessage != nil {
 		return c.responseMessage
 	}
 
-	var conn net.Conn
-	if c.dnsUpstream.SOCKS5Address != "" {
-		s, err := proxy.SOCKS5(c.dnsUpstream.Protocol, c.dnsUpstream.SOCKS5Address, nil, proxy.Direct)
-		if err != nil {
-			log.Warnf("Failed to connect to SOCKS5 proxy: %s", err)
-			return nil
-		}
-		conn, err = s.Dial(c.dnsUpstream.Protocol, c.dnsUpstream.Address)
-		if err != nil {
-			log.Warnf("Failed to connect to upstream via SOCKS5 proxy: %s", err)
-			return nil
-		}
-	} else if c.dnsUpstream.Protocol == "tcp-tls" {
-		var err error
-		conf := &tls.Config{
-			InsecureSkipVerify: false,
-		}
-		s := strings.Split(c.dnsUpstream.Address, "@")
-		if len(s) == 2 {
-			var servername, port string
-			if servername, port, err = net.SplitHostPort(s[0]); err != nil {
-				log.Warnf("Failed to parse DNS-over-TLS upstream address: %s", err)
-				return nil
-			}
-			conf.ServerName = servername
-			c.dnsUpstream.Address = net.JoinHostPort(s[1], port)
-		}
-		if conn, err = tls.Dial("tcp", c.dnsUpstream.Address, conf); err != nil {
-			log.Warnf("Failed to connect to DNS-over-TLS upstream: %s", err)
-			return nil
-		}
-	} else {
-		var err error
-		if conn, err = net.Dial(c.dnsUpstream.Protocol, c.dnsUpstream.Address); err != nil {
-			log.Warnf("Failed to connect to DNS upstream: %s", err)
-			return nil
-		}
-	}
-
-	dnsTimeout := time.Duration(c.dnsUpstream.Timeout) * time.Second / 3
-
-	conn.SetDeadline(time.Now().Add(dnsTimeout))
-	conn.SetReadDeadline(time.Now().Add(dnsTimeout))
-	conn.SetWriteDeadline(time.Now().Add(dnsTimeout))
-
-	dc := &dns.Conn{Conn: conn,UDPSize:65535}
-	defer dc.Close()
-	err := dc.WriteMsg(c.questionMessage)
-	if err != nil {
-		log.Warnf("%s Fail: Send question message failed", c.dnsUpstream.Name)
-		return nil
-	}
-	temp, err := dc.ReadMsg()
+	var temp *dns.Msg
+	var err error
+	temp, err = c.dnsResolver.Exchange(c.questionMessage)
 
 	if err != nil {
 		log.Debugf("%s Fail: %s", c.dnsUpstream.Name, err)
 		return nil
 	}
 	if temp == nil {
-		log.Debugf("%s Fail: Response message returned nil, maybe timeout? Please check your query or DNS configuration")
+		log.Debugf("%s Fail: Response message returned nil, maybe timeout? Please check your query or DNS configuration", c.dnsUpstream.Name)
 		return nil
 	}
 

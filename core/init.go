@@ -26,13 +26,15 @@ func InitServer(configFilePath string) {
 		DomainPrimaryList:           conf.DomainPrimaryList,
 		DomainAlternativeList:       conf.DomainAlternativeList,
 
-		RedirectIPv6Record: conf.IPv6UseAlternativeDNS,
-		MinimumTTL:         conf.MinimumTTL,
-		DomainTTLMap:       conf.DomainTTLMap,
+		RedirectIPv6Record:       conf.IPv6UseAlternativeDNS,
+		AlternativeDNSConcurrent: conf.AlternativeDNSConcurrent,
+		MinimumTTL:               conf.MinimumTTL,
+		DomainTTLMap:             conf.DomainTTLMap,
 
 		Hosts: conf.Hosts,
 		Cache: conf.Cache,
 	}
+	dispatcher.Init()
 
 	s := inbound.NewServer(conf.BindAddress, conf.DebugHTTPAddress, dispatcher, conf.RejectQType)
 

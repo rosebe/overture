@@ -1,17 +1,22 @@
 # overture
 [![Build Status](https://travis-ci.org/shawn1m/overture.svg)](https://travis-ci.org/shawn1m/overture)
+[![Build status](https://ci.appveyor.com/api/projects/status/gqrixsfcmmrcaohr/branch/master?svg=true)](https://ci.appveyor.com/project/shawn1m/overture/branch/master)
 [![GoDoc](https://godoc.org/github.com/shawn1m/overture?status.svg)](https://godoc.org/github.com/shawn1m/overture)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shawn1m/overture)](https://goreportcard.com/report/github.com/shawn1m/overture)
+[![codecov](https://codecov.io/gh/shawn1m/overture/branch/master/graph/badge.svg)](https://codecov.io/gh/shawn1m/overture)
 
 Overture is a DNS server/forwarder/dispatcher written in Go.
 
 Overture means an orchestral piece at the beginning of a classical music composition, just like DNS which is nearly the
 first step of surfing the Internet.
 
-**Please note: If you are using the binary releases, please follow the instructions in the README file with
-corresponding git version tag. The README in master branch are subject to change and does not always reflect the correct
- instructions to your binary release version.**
-
+**Please note:** 
+- **Read the entire README document is necessary if you want to use overture safe and sound.** 
+- **Production usage is not recommended and there is no guarantee or warranty of it.**
+- **If you are using the binary releases, please follow the instructions in the README file with
+  corresponding git version tag. The README in master branch are subject to change and does not always reflect the correct
+   instructions to your binary release version.**
+   
 ## Features
 
 + Full IPv6 support
@@ -24,7 +29,7 @@ corresponding git version tag. The README in master branch are subject to change
     + Custom domain
     + Custom IP network
 + Minimum TTL modification
-+ Hosts (**Regex match** for now and will return ip in random order if necessary)
++ Hosts (Both IPv4 and IPv6 is supported. IPs will be returned in random order, if you want to use regex match, please understand regex first)
 + Cache with ECS
 
 ### Dispatch process
@@ -93,9 +98,9 @@ Configuration file is "config.json" by default:
   ],
   "AlternativeDNS": [
     {
-      "Name": "OpenDNS",
-      "Address": "208.67.222.222:443",
-      "Protocol": "tcp",
+      "Name": "114DNS",
+      "Address": "114.114.114.114:53",
+      "Protocol": "udp",
       "SOCKS5Address": "",
       "Timeout": 6,
       "EDNSClientSubnet": {
@@ -107,6 +112,7 @@ Configuration file is "config.json" by default:
   ],
   "OnlyPrimaryDNS": false,
   "IPv6UseAlternativeDNS": false,
+  "AlternativeDNSConcurrent": false,
   "WhenPrimaryDNSAnswerNoneUse": "PrimaryDNS",
   "IPNetworkFile": {
     "Primary": "./ip_network_primary_sample",
@@ -115,9 +121,12 @@ Configuration file is "config.json" by default:
   "DomainFile": {
     "Primary": "./domain_primary_sample",
     "Alternative": "./domain_alternative_sample",
-    "Matcher":  "regex-list"
+    "Matcher":  "full-map"
   },
-  "HostsFile": "./hosts_sample",
+  "HostsFile": {
+    "HostsFile": "./hosts_sample",
+    "Finder": "full-map"
+  },
   "MinimumTTL": 0,
   "DomainTTLFile" : "./domain_ttl_sample",
   "CacheSize" : 0,
@@ -129,7 +138,7 @@ Tips:
 
 + BindAddress: Specifying only port (e.g. `:53`) will have overture listen on all available addresses (both IPv4 and
 IPv6). Overture will handle both TCP and UDP requests. Literal IPv6 addresses are enclosed in square brackets (e.g. `[2001:4860:4860::8888]:53`)
-+ DebugHTTPAddress: Specifying an HTTP port for debugging, currently used to dump DNS cache, and the request url is `/cache`, available query argument is `nobody`(boolean)
++ DebugHTTPAddress: Specifying an HTTP port for debugging (**`5555` is the default port but it is also acknowledged as the android wifi adb listener port**), currently used to dump DNS cache, and the request url is `/cache`, available query argument is `nobody`(boolean)
 
     * true(default): only get the cache size;
 
@@ -183,8 +192,10 @@ IPv6). Overture will handle both TCP and UDP requests. Literal IPv6 addresses ar
 + DNS: You can specify multiple DNS upstream servers here.
     + Name: This field is only used for logging.
     + Address: Same as BindAddress.
-    + Protocol: `tcp`, `udp` or `tcp-tls`
+    + Protocol: `tcp`, `udp`, `tcp-tls` or `https`
         + `tcp-tls`: Address format is "servername:port@serverAddress", try one.one.one.one:853 or one.one.one.one:853@1.1.1.1
+        + `https`: Just try https://cloudflare-dns.com/dns-query
+        +  Check [DNS Privacy Public Resolvers](https://dnsprivacy.org/wiki/display/DP/DNS+Privacy+Public+Resolvers) for more public `tcp-tls`, `https` resolvers.
     + SOCKS5Address: Forward dns query to this SOCKS5 proxy, `“”` to disable.
     + EDNSClientSubnet: Used to improve DNS accuracy. Please check [RFC7871](https://tools.ietf.org/html/rfc7871) for
     details.
@@ -196,33 +207,41 @@ IPv6). Overture will handle both TCP and UDP requests. Literal IPv6 addresses ar
         + NoCookie: Disable cookie.
 + OnlyPrimaryDNS: Disable dispatcher feature, use primary DNS only.
 + IPv6UseAlternativeDNS: Redirect IPv6 DNS queries to alternative DNS servers.
++ AlternativeDNSConcurrent: Query the PrimaryDNS and AlternativeDNS at the same time
 + WhenPrimaryDNSAnswerNoneUse: If the response of PrimaryDNS exists and there is no `ANSWER SECTION` in it, the final DNS should be defined. (There is no `AAAA` record for most domains right now) 
 + File: Absolute path like `/path/to/file` is allowed. For Windows users, please use properly escaped path like
   `C:\\path\\to\\file.txt` in the configuration.
-+ DomainFile.Matcher: Matching policy and implementation, including "full-list", "full-map", "regex-list" and "suffix-tree". Default value is "regex-list".
++ DomainFile.Matcher: Matching policy and implementation, including "full-list", "full-map", "regex-list", "mix-list", "suffix-tree" and "final". Default value is "full-map".
++ HostsFile.Finder: Finder policy and implementation, including "full-map", "regex-list". Default value is "full-map".
++ DomainTTLFile: Regex match only for now;
 + MinimumTTL: Set the minimum TTL value (in seconds) in order to improve caching efficiency, use `0` to disable.
 + CacheSize: The number of query record to cache, use `0` to disable.
 + RejectQType: Reject inbound query with specific DNS record types, check [List of DNS record types](https://en.wikipedia.org/wiki/List_of_DNS_record_types) for details.
 
-#### Domain file example (regex match)
+#### Domain file example (full match)
 
     example.com
-    ^xxx.xx
 
+#### Domain file example (regex match)
+
+    ^xxx.xx
+    
 #### IP network file example (CIDR match)
 
     1.0.1.0/24
-    10.8.0.0/16
     ::1/128
     
- #### Domain TTL file example (regex match)
+#### Domain TTL file example (regex match)
  
      example.com$ 100
 
-#### Hosts file example (regex match)
+#### Hosts file example (full match)
 
     127.0.0.1 localhost
     ::1 localhost
+    
+#### Hosts file example (regex match)
+
     10.8.0.1 example.com$
 
 #### DNS servers with ECS support

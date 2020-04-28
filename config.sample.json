@@ -17,9 +17,9 @@
   ],
   "AlternativeDNS": [
     {
-      "Name": "OpenDNS",
-      "Address": "208.67.222.222:443",
-      "Protocol": "tcp",
+      "Name": "114DNS",
+      "Address": "114.114.114.114:53",
+      "Protocol": "udp",
       "SOCKS5Address": "",
       "Timeout": 6,
       "EDNSClientSubnet": {
@@ -31,6 +31,9 @@
   ],
   "OnlyPrimaryDNS": false,
   "IPv6UseAlternativeDNS": false,
+  "AlternativeDNSConcurrent": false,
+  "PoolIdleTimeout": 15,
+  "PoolMaxCapacity": 15,
   "WhenPrimaryDNSAnswerNoneUse": "PrimaryDNS",
   "IPNetworkFile": {
     "Primary": "./ip_network_primary_sample",
@@ -39,9 +42,12 @@
   "DomainFile": {
     "Primary": "./domain_primary_sample",
     "Alternative": "./domain_alternative_sample",
-    "Matcher":  "regex-list"
+    "Matcher":  "full-map"
   },
-  "HostsFile": "./hosts_sample",
+  "HostsFile": {
+    "HostsFile": "./hosts_sample",
+    "Finder": "full-map"
+  },
   "MinimumTTL": 0,
   "DomainTTLFile" : "./domain_ttl_sample",
   "CacheSize" : 0,

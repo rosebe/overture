@@ -4,6 +4,7 @@ import (
 	"net"
 
 	"github.com/miekg/dns"
+	"github.com/shawn1m/overture/core/outbound/clients/resolver"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/shawn1m/overture/core/cache"
@@ -24,17 +25,35 @@ type Dispatcher struct {
 	DomainPrimaryList           matcher.Matcher
 	DomainAlternativeList       matcher.Matcher
 	RedirectIPv6Record          bool
+	AlternativeDNSConcurrent    bool
 
 	MinimumTTL   int
 	DomainTTLMap map[string]uint32
 
 	Hosts *hosts.Hosts
 	Cache *cache.Cache
+
+	primaryResolvers     []resolver.Resolver
+	alternativeResolvers []resolver.Resolver
+}
+
+func createResolver(ul []*common.DNSUpstream) (resolvers []resolver.Resolver) {
+	resolvers = make([]resolver.Resolver, len(ul))
+	for i, u := range ul {
+		resolvers[i] = resolver.NewResolver(u)
+	}
+	return resolvers
+}
+
+func (d *Dispatcher) Init() {
+	d.primaryResolvers = createResolver(d.PrimaryDNS)
+	d.alternativeResolvers = createResolver(d.AlternativeDNS)
 }
 
 func (d *Dispatcher) Exchange(query *dns.Msg, inboundIP string) *dns.Msg {
-	PrimaryClientBundle := clients.NewClientBundle(query, d.PrimaryDNS, inboundIP, d.MinimumTTL, d.Cache, "Primary", d.DomainTTLMap)
-	AlternativeClientBundle := clients.NewClientBundle(query, d.AlternativeDNS, inboundIP, d.MinimumTTL, d.Cache, "Alternative", d.DomainTTLMap)
+	PrimaryClientBundle := clients.NewClientBundle(query, d.PrimaryDNS, d.primaryResolvers, inboundIP, d.MinimumTTL, d.Cache, "Primary", d.DomainTTLMap)
+	AlternativeClientBundle := clients.NewClientBundle(query, d.AlternativeDNS, d.alternativeResolvers, inboundIP, d.MinimumTTL, d.Cache, "Alternative", d.DomainTTLMap)
+
 	var ActiveClientBundle *clients.RemoteClientBundle
 
 	localClient := clients.NewLocalClient(query, d.Hosts, d.MinimumTTL, d.DomainTTLMap)
@@ -62,14 +81,9 @@ func (d *Dispatcher) Exchange(query *dns.Msg, inboundIP string) *dns.Msg {
 
 	ActiveClientBundle = d.selectByIPNetwork(PrimaryClientBundle, AlternativeClientBundle)
 
-	if ActiveClientBundle == AlternativeClientBundle {
-		resp = ActiveClientBundle.Exchange(true, true)
-		return resp
-	} else {
-		// Only try to Cache result before return
-		ActiveClientBundle.CacheResultIfNeeded()
-		return ActiveClientBundle.GetResponseMessage()
-	}
+	// Only try to Cache result before return
+	ActiveClientBundle.CacheResultIfNeeded()
+	return ActiveClientBundle.GetResponseMessage()
 }
 
 func (d *Dispatcher) isExchangeForIPv6(query *dns.Msg) bool {
@@ -104,22 +118,40 @@ func (d *Dispatcher) isSelectDomain(rcb *clients.RemoteClientBundle, dt matcher.
 }
 
 func (d *Dispatcher) selectByIPNetwork(PrimaryClientBundle, AlternativeClientBundle *clients.RemoteClientBundle) *clients.RemoteClientBundle {
-
-	primaryResponse := PrimaryClientBundle.Exchange(false, true)
-
-	if primaryResponse == nil {
-		log.Debug("Primary DNS return nil, finally use alternative DNS")
-		return AlternativeClientBundle
+	primaryOut := make(chan *dns.Msg)
+	alternateOut := make(chan *dns.Msg)
+	go func() {
+		primaryOut <- PrimaryClientBundle.Exchange(false, true)
+	}()
+	alternateFunc := func() {
+		alternateOut <- AlternativeClientBundle.Exchange(false, true)
 	}
-
-	if primaryResponse.Answer == nil {
-		if d.WhenPrimaryDNSAnswerNoneUse == "AlternativeDNS" {
-			log.Debug("Primary DNS response has no answer section but exist, finally use AlternativeDNS")
-			return AlternativeClientBundle
-		} else {
-			log.Debug("Primary DNS response has no answer section but exist, finally use PrimaryDNS")
-			return PrimaryClientBundle
+	waitAlternateResp := func() {
+		if !d.AlternativeDNSConcurrent {
+			go alternateFunc()
 		}
+		<-alternateOut
+	}
+	if d.AlternativeDNSConcurrent {
+		go alternateFunc()
+	}
+	primaryResponse := <-primaryOut
+
+	if primaryResponse != nil {
+		if primaryResponse.Answer == nil {
+			if d.WhenPrimaryDNSAnswerNoneUse != "AlternativeDNS" {
+				log.Debug("Primary DNS response has no answer section but exist, finally use PrimaryDNS")
+				return PrimaryClientBundle
+			} else {
+				log.Debug("Primary DNS response has no answer section but exist, finally use AlternativeDNS")
+				waitAlternateResp()
+				return AlternativeClientBundle
+			}
+		}
+	} else {
+		log.Debug("Primary DNS return nil, finally use alternative DNS")
+		waitAlternateResp()
+		return AlternativeClientBundle
 	}
 
 	for _, a := range PrimaryClientBundle.GetResponseMessage().Answer {
@@ -138,9 +170,11 @@ func (d *Dispatcher) selectByIPNetwork(PrimaryClientBundle, AlternativeClientBun
 		}
 		if common.IsIPMatchList(ip, d.IPNetworkAlternativeList, true, "alternative") {
 			log.Debug("Finally use alternative DNS")
+			waitAlternateResp()
 			return AlternativeClientBundle
 		}
 	}
 	log.Debug("IP network match failed, finally use alternative DNS")
+	waitAlternateResp()
 	return AlternativeClientBundle
 }

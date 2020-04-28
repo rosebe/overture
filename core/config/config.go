@@ -14,35 +14,45 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/shawn1m/overture/core/finder"
+	finderfull "github.com/shawn1m/overture/core/finder/full"
+	finderregex "github.com/shawn1m/overture/core/finder/regex"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/shawn1m/overture/core/cache"
 	"github.com/shawn1m/overture/core/common"
 	"github.com/shawn1m/overture/core/hosts"
 	"github.com/shawn1m/overture/core/matcher"
-	"github.com/shawn1m/overture/core/matcher/full"
-	"github.com/shawn1m/overture/core/matcher/mix"
-	"github.com/shawn1m/overture/core/matcher/regex"
-	"github.com/shawn1m/overture/core/matcher/suffix"
+	matcherfinal "github.com/shawn1m/overture/core/matcher/final"
+	matcherfull "github.com/shawn1m/overture/core/matcher/full"
+	matchermix "github.com/shawn1m/overture/core/matcher/mix"
+	matcherregex "github.com/shawn1m/overture/core/matcher/regex"
+	matchersuffix "github.com/shawn1m/overture/core/matcher/suffix"
 )
 
 type Config struct {
-	BindAddress           string
-	DebugHTTPAddress      string
-	PrimaryDNS            []*common.DNSUpstream
-	AlternativeDNS        []*common.DNSUpstream
-	OnlyPrimaryDNS        bool
-	IPv6UseAlternativeDNS bool
-	IPNetworkFile         struct {
+	BindAddress              string
+	DebugHTTPAddress         string
+	PrimaryDNS               []*common.DNSUpstream
+	AlternativeDNS           []*common.DNSUpstream
+	OnlyPrimaryDNS           bool
+	IPv6UseAlternativeDNS    bool
+	AlternativeDNSConcurrent bool
+	IPNetworkFile            struct {
 		Primary     string
 		Alternative string
 	}
 	DomainFile struct {
-		Primary     string
-		Alternative string
-		Matcher     string
+		Primary            string
+		Alternative        string
+		PrimaryMatcher     string
+		AlternativeMatcher string
+		Matcher            string
 	}
-	HostsFile     string
+	HostsFile struct {
+		HostsFile string
+		Finder    string
+	}
 	MinimumTTL    int
 	DomainTTLFile string
 	CacheSize     int
@@ -64,8 +74,8 @@ func NewConfig(configFile string) *Config {
 
 	config.DomainTTLMap = getDomainTTLMap(config.DomainTTLFile)
 
-	config.DomainPrimaryList = initDomainMatcher(config.DomainFile.Primary, config.DomainFile.Matcher)
-	config.DomainAlternativeList = initDomainMatcher(config.DomainFile.Alternative, config.DomainFile.Matcher)
+	config.DomainPrimaryList = initDomainMatcher(config.DomainFile.Primary, config.DomainFile.PrimaryMatcher, config.DomainFile.Matcher)
+	config.DomainAlternativeList = initDomainMatcher(config.DomainFile.Alternative, config.DomainFile.AlternativeMatcher, config.DomainFile.Matcher)
 
 	config.IPNetworkPrimaryList = getIPNetworkList(config.IPNetworkFile.Primary)
 	config.IPNetworkAlternativeList = getIPNetworkList(config.IPNetworkFile.Alternative)
@@ -83,7 +93,7 @@ func NewConfig(configFile string) *Config {
 		log.Info("Cache is disabled")
 	}
 
-	h, err := hosts.New(config.HostsFile)
+	h, err := hosts.New(config.HostsFile.HostsFile, getFinder(config.HostsFile.Finder))
 	if err != nil {
 		log.Warnf("Failed to load hosts file: %s", err)
 	} else {
@@ -129,31 +139,26 @@ func getDomainTTLMap(file string) map[string]uint32 {
 
 	dtl := map[string]uint32{}
 
-	reader := bufio.NewReader(f)
+	scanner := bufio.NewScanner(f)
 
-	for {
-		// The last line may not contains an '\n'
-		line, err := reader.ReadString('\n')
-		if err != nil && err != io.EOF {
-			log.Errorf("Failed to read domain TTL file %s: %s", file, err)
-			break
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) == 0 {
+			continue
 		}
-
-		if line != "" {
-			words := strings.Fields(line)
-			if len(words) > 1 {
-				tempInt64, err := strconv.ParseUint(words[1], 10, 32)
-				dtl[words[0]] = uint32(tempInt64)
-				if err != nil {
-					log.WithFields(log.Fields{"domain": words[0], "ttl": words[1]}).Warnf("Invalid TTL for domain %s: %s", words[0], words[1])
-					failures++
-					failedLines = append(failedLines, line)
-				}
-				successes++
-			} else {
-				failedLines = append(failedLines, line)
+		words := strings.Fields(line)
+		if len(words) > 1 {
+			tempInt64, err := strconv.ParseUint(words[1], 10, 32)
+			dtl[words[0]] = uint32(tempInt64)
+			if err != nil {
+				log.WithFields(log.Fields{"domain": words[0], "ttl": words[1]}).Warnf("Invalid TTL for domain %s: %s", words[0], words[1])
 				failures++
+				failedLines = append(failedLines, line)
 			}
+			successes++
+		} else {
+			failedLines = append(failedLines, line)
+			failures++
 		}
 		if line == "" && err == io.EOF {
 			log.Debugf("Reading domain TTL file %s reached EOF", file)
@@ -185,24 +190,43 @@ func getDomainTTLMap(file string) map[string]uint32 {
 func getDomainMatcher(name string) (m matcher.Matcher) {
 	switch name {
 	case "suffix-tree":
-		return suffix.DefaultDomainTree()
+		return matchersuffix.DefaultDomainTree()
 	case "full-map":
-		return &full.Map{DataMap: make(map[string]struct{}, 100)}
+		return &matcherfull.Map{DataMap: make(map[string]struct{}, 100)}
 	case "full-list":
-		return &full.List{}
+		return &matcherfull.List{}
 	case "regex-list":
-		return &regex.List{}
+		return &matcherregex.List{}
 	case "mix-list":
-		return &mix.List{}
+		return &matchermix.List{}
+	case "final":
+		return &matcherfinal.Default{}
 	default:
-		log.Warnf("Matcher %s does not exist, using regex-list matcher as default", name)
-		return &regex.List{}
+		log.Warnf("Matcher %s does not exist, using full-map matcher as default", name)
+		return &matcherfull.Map{DataMap: make(map[string]struct{}, 100)}
 	}
 }
 
-func initDomainMatcher(file string, name string) (m matcher.Matcher) {
-	m = getDomainMatcher(name)
+func getFinder(name string) (f finder.Finder) {
+	switch name {
+	case "regex-list":
+		return &finderregex.List{RegexMap: make(map[string][]string, 100)}
+	case "full-map":
+		return &finderfull.Map{DataMap: make(map[string][]string, 100)}
+	default:
+		log.Warnf("Finder %s does not exist, using full-map finder as default", name)
+		return &finderfull.Map{DataMap: make(map[string][]string, 100)}
+	}
+}
 
+func initDomainMatcher(file string, name string, defaultName string) (m matcher.Matcher) {
+	if name == "" {
+		name = defaultName
+	}
+	m = getDomainMatcher(name)
+	if name == "final" {
+		return m
+	}
 	if file == "" {
 		return
 	}
@@ -215,15 +239,12 @@ func initDomainMatcher(file string, name string) (m matcher.Matcher) {
 	defer f.Close()
 
 	lines := 0
-	reader := bufio.NewReader(f)
-
-	for {
-		line, err := reader.ReadString('\n')
-		if err != nil && err != io.EOF {
-			log.Errorf("Failed to read domain file %s: %s", file, err)
-			break
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) == 0 {
+			continue
 		}
-
 		line = strings.TrimSpace(line)
 		if line != "" {
 			_ = m.Insert(line)
@@ -258,31 +279,22 @@ func getIPNetworkList(file string) []*net.IPNet {
 	failures := 0
 	var failedLines []string
 
-	reader := bufio.NewReader(f)
-	for {
-		line, err := reader.ReadString('\n')
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if len(line) == 0 {
+			continue
+		}
+		_, ipNet, err := net.ParseCIDR(strings.TrimSuffix(line, "\n"))
 		if err != nil {
-			if err != io.EOF {
-				log.Errorf("Failed to read IP network file %s: %s", file, err)
-			} else {
-				log.Debugf("Reading IP network file %s has reached EOF", file)
-			}
-			break
+			log.Errorf("Error parsing IP network CIDR %s: %s", line, err)
+			failures++
+			failedLines = append(failedLines, line)
+			continue
 		}
-
-		if line != "" {
-			_, ipNet, err := net.ParseCIDR(strings.TrimSuffix(line, "\n"))
-			if err != nil {
-				log.Errorf("Error parsing IP network CIDR %s: %s", line, err)
-				failures++
-				failedLines = append(failedLines, line)
-				continue
-			}
-			ipNetList = append(ipNetList, ipNet)
-			successes++
-		}
+		ipNetList = append(ipNetList, ipNet)
+		successes++
 	}
-
 	if len(ipNetList) > 0 {
 		log.Infof("IP network file %s has been loaded with %d records", file, successes)
 		if failures > 0 {
